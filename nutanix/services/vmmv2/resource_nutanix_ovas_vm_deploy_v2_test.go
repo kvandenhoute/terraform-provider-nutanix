@@ -19,7 +19,6 @@ func TestAccV2NutanixOvaVmDeployResource_DeployVMFromOva(t *testing.T) {
 	vmName := fmt.Sprintf("tf-test-vm-ova-%d", r)
 	vmDescription := "VM for OVA terraform testing"
 	ovaName := fmt.Sprintf("tf-test-ova-%d", r)
-	// ovaNameUpdated := fmt.Sprintf("tf-test-ova-updated-%d", r)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:  func() { acc.TestAccPreCheck(t) },
@@ -54,7 +53,7 @@ func TestAccV2NutanixOvaVmDeployResource_DeployVMFromOva(t *testing.T) {
 	})
 }
 
-func TestAccV2NutanixOvaVmDeployResource_DeployVmFromOvaDoseNotExists(t *testing.T) {
+func TestAccV2NutanixOvaVmDeployResource_DeployVmFromOvaDoesNotExist(t *testing.T) {
 	r := acctest.RandIntRange(1, 999)
 	ovaName := fmt.Sprintf("tf-test-ova-%d", r)
 

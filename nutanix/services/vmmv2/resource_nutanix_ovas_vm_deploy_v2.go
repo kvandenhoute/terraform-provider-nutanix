@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
@@ -18,60 +19,91 @@ import (
 	"github.com/terraform-providers/terraform-provider-nutanix/utils"
 )
 
+const (
+	ovaVMDeployTimeout = 30 * time.Minute
+	ovaVMDeployDelay   = 10 * time.Second
+)
+
 func ResourceNutanixOvaVMDeploymentV2() *schema.Resource {
 	return &schema.Resource{
 		CreateContext: ResourceNutanixOvaVMDeploymentCreate,
 		ReadContext:   ResourceNutanixOvaVMDeploymentRead,
 		UpdateContext: ResourceNutanixOvaVMDeploymentUpdate,
 		DeleteContext: ResourceNutanixOvaVMDeploymentDelete,
+		Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+		},
+		Timeouts: &schema.ResourceTimeout{
+			Create: schema.DefaultTimeout(ovaVMDeployTimeout),
+			Update: schema.DefaultTimeout(ovaVMDeployTimeout),
+			Delete: schema.DefaultTimeout(ovaVMDeployTimeout),
+		},
 		Schema: map[string]*schema.Schema{
 			"ext_id": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				Description: "The globally unique identifier of the OVA image to deploy VM from.",
 			},
 			"override_vm_config": {
-				Type:     schema.TypeList,
-				Required: true,
+				Type:        schema.TypeList,
+				Required:    true,
+				MaxItems:    1,
+				Description: "Override VM configuration parameters when deploying from OVA.",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"name": {
-							Type:     schema.TypeString,
-							Optional: true,
+							Type:        schema.TypeString,
+							Optional:    true,
+							Description: "Name of the VM to be deployed from OVA.",
 						},
 						"num_sockets": {
-							Type:     schema.TypeInt,
-							Optional: true,
+							Type:         schema.TypeInt,
+							Optional:     true,
+							Description:  "Number of sockets for the VM CPU configuration.",
+							ValidateFunc: validation.IntAtLeast(1),
 						},
 						"num_cores_per_socket": {
-							Type:     schema.TypeInt,
-							Optional: true,
+							Type:         schema.TypeInt,
+							Optional:     true,
+							Description:  "Number of cores per socket for the VM CPU configuration.",
+							ValidateFunc: validation.IntAtLeast(1),
 						},
 						"num_threads_per_core": {
-							Type:     schema.TypeInt,
-							Optional: true,
+							Type:         schema.TypeInt,
+							Optional:     true,
+							Description:  "Number of threads per core for the VM CPU configuration.",
+							ValidateFunc: validation.IntAtLeast(1),
 						},
 						"memory_size_bytes": {
-							Type:     schema.TypeInt,
-							Optional: true,
+							Type:         schema.TypeInt,
+							Optional:     true,
+							Description:  "Memory size of the VM in bytes.",
+							ValidateFunc: validation.IntAtLeast(1),
 						},
 						"power_state": {
 							Type:         schema.TypeString,
 							Optional:     true,
 							Default:      "ON",
+							Description:  "Power state of the VM (ON or OFF).",
 							ValidateFunc: validation.StringInSlice([]string{"ON", "OFF"}, false),
 						},
 						"nics": {
-							Type:     schema.TypeList,
-							Required: true,
+							Type:        schema.TypeList,
+							Required:    true,
+							Description: "Network interface controllers (NICs) for the VM.",
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
 									"ext_id": {
-										Type:     schema.TypeString,
-										Computed: true,
+										Type:        schema.TypeString,
+										Computed:    true,
+										Description: "The globally unique identifier of the NIC.",
 									},
 									"backing_info": {
-										Type:     schema.TypeList,
-										Optional: true,
+										Type:        schema.TypeList,
+										Optional:    true,
+										MaxItems:    1,
+										Description: "Backing information for the NIC including model and MAC address.",
 										Elem: &schema.Resource{
 											Schema: map[string]*schema.Schema{
 												"model": {
@@ -451,10 +483,12 @@ func ResourceNutanixOvaVMDeploymentCreate(ctx context.Context, d *schema.Resourc
 	taskconn := meta.(*conns.Client).PrismAPI
 	// Wait for the deployed vm from ova to be available
 	stateConf := &resource.StateChangeConf{
-		Pending: []string{"QUEUED", "RUNNING", "PENDING"},
-		Target:  []string{"SUCCEEDED"},
-		Refresh: taskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
-		Timeout: d.Timeout(schema.TimeoutCreate),
+		Pending:      []string{"QUEUED", "RUNNING", "PENDING"},
+		Target:       []string{"SUCCEEDED"},
+		Refresh:      taskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
+		Timeout:      d.Timeout(schema.TimeoutCreate),
+		Delay:        ovaVMDeployDelay,
+		PollInterval: ovaVMDeployDelay,
 	}
 
 	if _, errWaitTask := stateConf.WaitForStateContext(ctx); errWaitTask != nil {
@@ -646,10 +680,12 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 		taskconn := meta.(*conns.Client).PrismAPI
 		// Wait for the VM update to complete
 		stateConf := &resource.StateChangeConf{
-			Pending: []string{"QUEUED", "RUNNING"},
-			Target:  []string{"SUCCEEDED"},
-			Refresh: taskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
-			Timeout: d.Timeout(schema.TimeoutUpdate),
+			Pending:      []string{"QUEUED", "RUNNING"},
+			Target:       []string{"SUCCEEDED"},
+			Refresh:      taskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
+			Timeout:      d.Timeout(schema.TimeoutUpdate),
+			Delay:        ovaVMDeployDelay,
+			PollInterval: ovaVMDeployDelay,
 		}
 
 		if _, errWaitTask := stateConf.WaitForStateContext(ctx); errWaitTask != nil {
@@ -734,10 +770,12 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 			if taskUUID != nil {
 				taskconn := meta.(*conns.Client).PrismAPI
 				stateConf := &resource.StateChangeConf{
-					Pending: []string{"QUEUED", "RUNNING"},
-					Target:  []string{"SUCCEEDED"},
-					Refresh: taskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
-					Timeout: d.Timeout(schema.TimeoutUpdate),
+					Pending:      []string{"QUEUED", "RUNNING"},
+					Target:       []string{"SUCCEEDED"},
+					Refresh:      taskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
+					Timeout:      d.Timeout(schema.TimeoutUpdate),
+					Delay:        ovaVMDeployDelay,
+					PollInterval: ovaVMDeployDelay,
 				}
 
 				if _, errWaitTask := stateConf.WaitForStateContext(ctx); errWaitTask != nil {
@@ -909,70 +947,16 @@ func ResourceNutanixOvaVMDeploymentDelete(ctx context.Context, d *schema.Resourc
 	taskconn := meta.(*conns.Client).PrismAPI
 	// Wait for the VM to be available
 	stateConf := &resource.StateChangeConf{
-		Pending: []string{"QUEUED", "RUNNING"},
-		Target:  []string{"SUCCEEDED"},
-		Refresh: taskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
-		Timeout: d.Timeout(schema.TimeoutCreate),
+		Pending:      []string{"QUEUED", "RUNNING"},
+		Target:       []string{"SUCCEEDED"},
+		Refresh:      taskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
+		Timeout:      d.Timeout(schema.TimeoutCreate),
+		Delay:        ovaVMDeployDelay,
+		PollInterval: ovaVMDeployDelay,
 	}
 
 	if _, errWaitTask := stateConf.WaitForStateContext(ctx); errWaitTask != nil {
 		return diag.Errorf("error waiting for vm (%s) to delete: %s", utils.StringValue(taskUUID), errWaitTask)
 	}
-	return nil
-}
-
-// Helper function to handle power state changes
-func handlePowerStateChange(ctx context.Context, conn *conns.Client, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	targetPowerState := d.Get("power_state").(string)
-	log.Printf("[DEBUG] Changing power state to: %s", targetPowerState)
-
-	readResp, err := conn.VmmAPI.VMAPIInstance.GetVmById(utils.StringPtr(d.Id()))
-	if err != nil {
-		return diag.Errorf("error reading VM for power state change: %v", err)
-	}
-
-	// Extract E-Tag Header
-	args := make(map[string]interface{})
-	args["If-Match"] = getEtagHeader(readResp, conn.VmmAPI)
-
-	var powerResp interface{}
-	var taskUUID *string
-
-	switch targetPowerState {
-	case "ON":
-		powerResp, err = conn.VmmAPI.VMAPIInstance.PowerOnVm(utils.StringPtr(d.Id()), args)
-		if err != nil {
-			return diag.Errorf("error powering on VM: %v", err)
-		}
-		TaskRef := powerResp.(*import3.TaskReference)
-		taskUUID = TaskRef.ExtId
-	case "OFF":
-		powerResp, err = conn.VmmAPI.VMAPIInstance.PowerOffVm(utils.StringPtr(d.Id()), args)
-		if err != nil {
-			return diag.Errorf("error powering off VM: %v", err)
-		}
-		TaskRef := powerResp.(*import3.TaskReference)
-		taskUUID = TaskRef.ExtId
-	default:
-		return diag.Errorf("unsupported power state: %s", targetPowerState)
-	}
-
-	if taskUUID != nil {
-		taskconn := meta.(*conns.Client).PrismAPI
-
-		// Wait for power state change to complete
-		stateConf := &resource.StateChangeConf{
-			Pending: []string{"QUEUED", "RUNNING"},
-			Target:  []string{"SUCCEEDED"},
-			Refresh: taskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
-			Timeout: d.Timeout(schema.TimeoutUpdate),
-		}
-
-		if _, errWaitTask := stateConf.WaitForStateContext(ctx); errWaitTask != nil {
-			return diag.Errorf("error waiting for power state change (%s): %s", utils.StringValue(taskUUID), errWaitTask)
-		}
-	}
-
-	log.Printf("[DEBUG] Power state changed successfully to: %s", targetPowerState)
 	return nil
 }
