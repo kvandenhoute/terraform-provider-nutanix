@@ -1745,7 +1745,7 @@ func expandDiskListRaw(diskList interface{}) []*v3.VMDisk {
 			// data_source_reference
 			if v1, ok := v["data_source_reference"]; ok && len(v1.(map[string]interface{})) != 0 {
 				dsref := v1.(map[string]interface{})
-				dl.DataSourceReference = validateShortRef(dsref)
+				dl.DataSourceReference = validateShortURLRef(dsref)
 			}
 			// volume_group_reference
 			if v1, ok := v["volume_group_reference"]; ok {
@@ -2531,6 +2531,7 @@ func resourceNutanixVirtualMachineInstanceResourceV0() *schema.Resource {
 			"disk_list": {
 				Type:     schema.TypeList,
 				Optional: true,
+				Computed: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"uuid": {

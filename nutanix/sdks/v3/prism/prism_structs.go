@@ -6,6 +6,14 @@ import (
 	"github.com/terraform-providers/terraform-provider-nutanix/nutanix/client"
 )
 
+// URLReference ...
+type URLReference struct {
+	Kind *string `json:"kind,omitempty" mapstructure:"kind,omitempty"`
+	Name *string `json:"name,omitempty" mapstructure:"name,omitempty"`
+	UUID *string `json:"uuid,omitempty" mapstructure:"uuid,omitempty"`
+	URL  *string `json:"url,omitempty" mapstructure:"url,omitempty"`
+}
+
 // Reference ...
 type Reference struct {
 	Kind *string `json:"kind" mapstructure:"kind"`
@@ -205,9 +213,66 @@ type VMStorageConfig struct {
 	StorageContainerReference *StorageContainerReference `json:"storage_container_reference,omitempty"`
 }
 
+// OVAImageIntentResponse represents the response object for intentful operations on an ovaimage
+type OVAImageIntentResponse struct {
+	VMSpec   *VMSpecContainer `json:"vm_spec"`
+	Warnings []interface{}    `json:"warnings"`
+}
+
+// Groups
+type GroupsRequestedAttribute struct {
+	Attribute *string `json:"attribute"`
+}
+
+type GroupsGetEntitiesRequest struct {
+	EntityType            *string                     `json:"entity_type"`
+	FilterCriteria        string                      `json:"filter_criteria,omitempty"`
+	GroupMemberAttributes []*GroupsRequestedAttribute `json:"group_member_attributes"`
+}
+
+type GroupsGetEntitiesResponse struct {
+	FilteredGroupCount int64                `json:"filtered_group_count,omitempty"`
+	GroupResults       []*GroupsGroupResult `json:"group_results"`
+}
+
+type GroupsGroupResult struct {
+	EntityResults []*GroupsEntity `json:"entity_results"`
+}
+
+type GroupsEntity struct {
+	Data     []*GroupsFieldData `json:"data"`
+	EntityID string             `json:"entity_id,omitempty"`
+}
+
+type GroupsFieldData struct {
+	Name   string                 `json:"name,omitempty"`
+	Values []*GroupsTimevaluePair `json:"values"`
+}
+
+type GroupsTimevaluePair struct {
+	Time   int64    `json:"time,omitempty"`
+	Values []string `json:"values"`
+}
+
+// VMSpecContainer holds the main VM specification details including metadata
+type VMSpecContainer struct {
+	APIVersion *string   `json:"api_version"`
+	Metadata   *Metadata `json:"metadata"`
+	Spec       *VMSpec   `json:"spec"`
+}
+
+// VMSpecContainer holds the main VM specification details
+type VMSpec struct {
+	AvailabilityZoneReference *Reference   `json:"availability_zone_reference,omitempty" mapstructure:"availability_zone_reference,omitempty"`
+	ClusterReference          *Reference   `json:"cluster_reference" mapstructure:"cluster_reference"`
+	Description               *string      `json:"description" mapstructure:"description"`
+	Name                      *string      `json:"name" mapstructure:"name"`
+	Resources                 *VMResources `json:"resources" mapstructure:"resources"`
+}
+
 // VMDisk VirtualMachine Disk (VM Disk).
 type VMDisk struct {
-	DataSourceReference *Reference `json:"data_source_reference,omitempty" mapstructure:"data_source_reference,omitempty"`
+	DataSourceReference *URLReference `json:"data_source_reference,omitempty" mapstructure:"data_source_reference,omitempty"`
 
 	DeviceProperties *VMDiskDeviceProperties `json:"device_properties,omitempty" mapstructure:"device_properties,omitempty"`
 

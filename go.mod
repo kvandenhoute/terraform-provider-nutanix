@@ -8,6 +8,7 @@ require (
 	github.com/golangci/golangci-lint v1.25.0
 	github.com/hashicorp/go-uuid v1.0.2
 	github.com/hashicorp/hcl/v2 v2.8.2 // indirect
+	github.com/hashicorp/terraform-plugin-log v0.2.0 // indirect
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.10.1
 	github.com/jinzhu/copier v0.4.0
 	github.com/mitchellh/gox v1.0.1

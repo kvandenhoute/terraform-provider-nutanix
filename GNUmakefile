@@ -2,8 +2,12 @@ TEST?=$$(go list ./... |grep -v 'vendor' |grep -v 'utils')
 GOFMT_FILES?=$$(find . -name '*.go' |grep -v vendor)
 PKG_NAME=nutanix
 WEBSITE_REPO=github.com/hashicorp/terraform-website
+BINARY=bin/terraform-provider-nutanix
 
 default: build
+
+build-binary:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -gcflags="all=-N -l" -o bin/.terraform/plugins/registry.terraform.io/nutanix/nutanix/1.99.99/linux_amd64/terraform-provider-nutanix
 
 build: fmtcheck
 	go install
@@ -19,7 +23,6 @@ testacc: fmtcheck
 fmt:
 	@echo "==> Fixing source code with gofmt..."
 	goimports -w ./$(PKG_NAME)
-	goimports -w ./client
 	goimports -w ./utils
 
 

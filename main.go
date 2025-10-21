@@ -9,4 +9,8 @@ func main() {
 	plugin.Serve(&plugin.ServeOpts{
 		ProviderFunc: provider.Provider,
 	})
+	// plugin.Debug(context.TODO(), "registry.terraform.io/nutanix/nutanix", &plugin.ServeOpts{
+	// 	ProviderFunc: provider.Provider,
+	// })
+
 }
