@@ -2,6 +2,7 @@ package vmmv2
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	import4 "github.com/nutanix/ntnx-api-golang-clients/prism-go-client/v4/models/prism/v4/config"
 	import3 "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/prism/v4/config"
 	import2 "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 	import1 "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/content"
@@ -396,8 +398,6 @@ func ResourceNutanixOvaVMDeploymentCreate(ctx context.Context, d *schema.Resourc
 	conn := meta.(*conns.Client).VmmAPI
 
 	extID := d.Get("ext_id").(string)
-	log.Printf("🚀🚀🚀 [DEBUG] Starting OVA VM deployment with OVA ext_id: %s 🚀🚀🚀", extID)
-	log.Printf("🔥🔥🔥 [INFO] CUSTOM PROVIDER IS BEING USED - OVA DEPLOYMENT STARTING 🔥🔥🔥")
 	vmDeploymentSpec := &import1.OvaDeploymentSpec{}
 	if clusterLocationExtID := d.Get("cluster_location_ext_id").(string); clusterLocationExtID != "" {
 		vmDeploymentSpec.ClusterLocationExtId = &clusterLocationExtID
@@ -424,15 +424,12 @@ func ResourceNutanixOvaVMDeploymentCreate(ctx context.Context, d *schema.Resourc
 				mem := int64(v)
 				overrideSpec.MemorySizeBytes = &mem
 			}
-			// Handle categories
 			if cats, ok := ovm["categories"]; ok {
 				overrideSpec.Categories = expandCategoryReference(cats.([]interface{}))
 			}
-			// Handle nics
 			if nics, ok := ovm["nics"]; ok {
 				overrideSpec.Nics = expandNic(nics.([]interface{}))
 			}
-			// Handle cd_roms
 			if cdroms, ok := ovm["cd_roms"]; ok {
 				overrideSpec.CdRoms = expandCdRom(cdroms.([]interface{}))
 			}
@@ -440,7 +437,7 @@ func ResourceNutanixOvaVMDeploymentCreate(ctx context.Context, d *schema.Resourc
 		}
 	}
 
-	log.Printf("🔥🔥🔥 [DEBUG] Calling DeployOva API with OVA ext_id: %s 🔥🔥🔥", extID)
+	log.Printf("[DEBUG] Calling DeployOva API with OVA ext_id: %s", extID)
 	resp, err := conn.OvasAPIInstance.DeployOva(&extID, vmDeploymentSpec)
 	if err != nil {
 		log.Printf("[ERROR] Failed to deploy OVA: %v", err)
@@ -467,40 +464,36 @@ func ResourceNutanixOvaVMDeploymentCreate(ctx context.Context, d *schema.Resourc
 
 	log.Printf("[DEBUG] OVA deployment task completed successfully with UUID: %s", utils.StringValue(taskUUID))
 
-	name := ""
-	if overrideVMConfig, ok := d.GetOk("override_vm_config"); ok {
-		overrideVMConfigList := overrideVMConfig.([]interface{})
-		if len(overrideVMConfigList) > 0 && overrideVMConfigList[0] != nil {
-			ovm := overrideVMConfigList[0].(map[string]interface{})
-			if v, ok := ovm["name"].(string); ok {
-				name = v
-			}
+	resourceUUID, err := taskconn.TaskRefAPI.GetTaskById(taskUUID, nil)
+	if err != nil {
+		var errordata map[string]interface{}
+		e := json.Unmarshal([]byte(err.Error()), &errordata)
+		if e != nil {
+			return diag.FromErr(e)
+		}
+		return diag.Errorf("error while fetching vm UUID : %v", err)
+	}
+	taskResult := resourceUUID.Data.GetValue().(import4.Task)
+
+	if len(taskResult.EntitiesAffected) == 0 {
+		return diag.Errorf("no entities affected in OVA deployment task")
+	}
+
+	var vmUUID *string
+	for _, entity := range taskResult.EntitiesAffected {
+		if entity.Rel != nil && *entity.Rel == "vmm:ahv:config:vm" {
+			vmUUID = entity.ExtId
+			log.Printf("[DEBUG] Found VM entity in task result: %s", *vmUUID)
+			break
 		}
 	}
-	filterf := "name eq '" + name + "'"
-	filter := utils.StringPtr(filterf)
-	offset := new(int)
-	limit := new(int)
-	*offset = 0
-	*limit = 1
-	log.Printf("[DEBUG] Listing VMs to find deployed VM with filter: %s", filterf)
-	listResp, err := conn.VMAPIInstance.ListVms(offset, limit, filter, nil, nil)
-	if err != nil {
-		log.Printf("[ERROR] Failed to list VMs: %v", err)
-		return diag.FromErr(err)
-	}
-	log.Printf("[DEBUG] Processing ListVms response")
-	vms, ok := listResp.Data.GetValue().([]import2.Vm)
-	if !ok || len(vms) == 0 {
-		log.Printf("[ERROR] No VM found with filter: %s", filterf)
-		return diag.Errorf("No VM found with filter: %s", filterf)
-	}
-	log.Printf("[DEBUG] Found deployed VM: count=%d, vm_id=%s", len(vms), *vms[0].ExtId)
-	getResp := vms[0]
 
-	d.SetId(*getResp.ExtId)
-	log.Printf("✅✅✅ [DEBUG] OVA VM deployment completed successfully: vm_id=%s, name=%s ✅✅✅", *getResp.ExtId, utils.StringValue(getResp.Name))
-	log.Printf("🎉🎉🎉 [INFO] CUSTOM PROVIDER DEPLOYMENT COMPLETED SUCCESSFULLY 🎉🎉🎉")
+	if vmUUID == nil {
+		return diag.Errorf("VM entity (vmm:ahv:vm) not found in task result")
+	}
+
+	d.SetId(*vmUUID)
+	log.Printf("[DEBUG] OVA VM deployment completed successfully: vm_id=%s", *vmUUID)
 
 	return nil
 }
@@ -520,7 +513,7 @@ func ResourceNutanixOvaVMDeploymentRead(ctx context.Context, d *schema.ResourceD
 func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn := meta.(*conns.Client).VmmAPI
 
-	log.Printf("[DEBUG] 🔄 Starting OVA VM update for VM ID: %s", d.Id())
+	log.Printf("[DEBUG] starting OVA VM update for VM ID: %s", d.Id())
 
 	// Check for hot-plug changes that require VM power off
 	hotPlugRequired := false
@@ -538,7 +531,7 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 				for _, field := range hotPlugFields {
 					if oldMap[field] != newMap[field] {
 						hotPlugRequired = true
-						log.Printf("[DEBUG] 🔥 Hot-plug change detected for field: %s", field)
+						log.Printf("[DEBUG] hot-plug change detected for field: %s", field)
 						break
 					}
 				}
@@ -548,7 +541,7 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 
 	// Power off VM if hot-plug changes are required
 	if hotPlugRequired && !isVMPowerOff(d, conn) {
-		log.Printf("[DEBUG] 🔌 VM needs to be powered off for hot-plug changes")
+		log.Printf("[DEBUG] VM needs to be powered off for hot-plug changes")
 		if err := callForPowerOffVM(ctx, conn, d, meta); err != nil {
 			return err
 		}
@@ -581,7 +574,7 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 				if name.(string) != currentName {
 					updateSpec.Name = utils.StringPtr(name.(string))
 					checkForUpdateParams = true
-					log.Printf("[DEBUG] 📝 Updating VM name from '%s' to '%s'", currentName, name.(string))
+					log.Printf("[DEBUG] updating VM name from '%s' to '%s'", currentName, name.(string))
 				}
 			}
 
@@ -593,7 +586,7 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 				if numSockets.(int) != currentSockets {
 					updateSpec.NumSockets = utils.IntPtr(numSockets.(int))
 					checkForUpdateParams = true
-					log.Printf("[DEBUG] 🖥️ Updating VM sockets from %d to %d", currentSockets, numSockets.(int))
+					log.Printf("[DEBUG] updating VM sockets from %d to %d", currentSockets, numSockets.(int))
 				}
 			}
 
@@ -605,7 +598,7 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 				if numCoresPerSocket.(int) != currentCores {
 					updateSpec.NumCoresPerSocket = utils.IntPtr(numCoresPerSocket.(int))
 					checkForUpdateParams = true
-					log.Printf("[DEBUG] 🖥️ Updating VM cores per socket from %d to %d", currentCores, numCoresPerSocket.(int))
+					log.Printf("[DEBUG] updating VM cores per socket from %d to %d", currentCores, numCoresPerSocket.(int))
 				}
 			}
 
@@ -617,7 +610,7 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 				if numThreadsPerCore.(int) != currentThreads {
 					updateSpec.NumThreadsPerCore = utils.IntPtr(numThreadsPerCore.(int))
 					checkForUpdateParams = true
-					log.Printf("[DEBUG] 🖥️ Updating VM threads per core from %d to %d", currentThreads, numThreadsPerCore.(int))
+					log.Printf("[DEBUG] updating VM threads per core from %d to %d", currentThreads, numThreadsPerCore.(int))
 				}
 			}
 
@@ -629,7 +622,7 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 				if int64(memorySizeBytes.(int)) != currentMemory {
 					updateSpec.MemorySizeBytes = utils.Int64Ptr(int64(memorySizeBytes.(int)))
 					checkForUpdateParams = true
-					log.Printf("[DEBUG] 💾 Updating VM memory from %d to %d", currentMemory, memorySizeBytes.(int))
+					log.Printf("[DEBUG] updating VM memory from %d to %d", currentMemory, memorySizeBytes.(int))
 				}
 			}
 		}
@@ -637,7 +630,7 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 
 	// Apply basic VM configuration updates if needed
 	if checkForUpdateParams {
-		log.Printf("[DEBUG] 📤 Applying VM configuration updates")
+		log.Printf("[DEBUG] Applying VM configuration updates")
 		// Extract E-Tag Header
 		args := make(map[string]interface{})
 		args["If-Match"] = getEtagHeader(updatedVMResp, conn)
@@ -662,7 +655,7 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 		if _, errWaitTask := stateConf.WaitForStateContext(ctx); errWaitTask != nil {
 			return diag.Errorf("error waiting for VM update task (%s): %s", utils.StringValue(taskUUID), errWaitTask)
 		}
-		log.Printf("[DEBUG] ✅ VM configuration update completed successfully")
+		log.Printf("[DEBUG] VM configuration update completed successfully")
 	}
 
 	// Power VM back on if it was powered off for hot-plug changes
@@ -673,7 +666,7 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 			if len(overrideVMConfigList) > 0 {
 				overrideConfig := overrideVMConfigList[0].(map[string]interface{})
 				if powerState, exists := overrideConfig["power_state"]; exists && powerState.(string) == "ON" {
-					log.Printf("[DEBUG] 🔌 Powering VM back on after hot-plug changes")
+					log.Printf("[DEBUG] Powering VM back on after hot-plug changes")
 					if err := callForPowerOnVM(ctx, conn, d, meta); err != nil {
 						return err
 					}
@@ -706,7 +699,7 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 
 		// Handle power state change if it actually changed and we haven't already handled it
 		if oldPowerState != newPowerState && newPowerState != "" && !hotPlugRequired {
-			log.Printf("[DEBUG] ⚡ Handling power state change from '%s' to '%s'", oldPowerState, newPowerState)
+			log.Printf("[DEBUG] Handling power state change from '%s' to '%s'", oldPowerState, newPowerState)
 
 			readResp, err := conn.VMAPIInstance.GetVmById(utils.StringPtr(d.Id()))
 			if err != nil {
@@ -751,17 +744,17 @@ func ResourceNutanixOvaVMDeploymentUpdate(ctx context.Context, d *schema.Resourc
 					return diag.Errorf("error waiting for power state change (%s): %s", utils.StringValue(taskUUID), errWaitTask)
 				}
 			}
-			log.Printf("[DEBUG] ✅ Power state changed successfully to: %s", newPowerState)
+			log.Printf("[DEBUG] Power state changed successfully to: %s", newPowerState)
 		}
 	}
 
-	log.Printf("[DEBUG] ✅ OVA VM update completed successfully")
+	log.Printf("[DEBUG] OVA VM update completed successfully")
 	return ResourceNutanixOvaVMDeploymentRead(ctx, d, meta)
 }
 
 // setOvaVMConfig sets the VM configuration in the Terraform state for OVA VMs
 func setOvaVMConfig(d *schema.ResourceData, vm import2.Vm) diag.Diagnostics {
-	log.Printf("[DEBUG] 📊 Setting OVA VM state from API response")
+	log.Printf("[DEBUG] Setting OVA VM state from API response")
 
 	// For OVA VMs, we want to be very conservative about state updates
 	// The main issue we're solving is the trunked_vlans drift
@@ -787,23 +780,23 @@ func setOvaVMConfig(d *schema.ResourceData, vm import2.Vm) diag.Diagnostics {
 				// This prevents overwriting user config with API defaults or missing values
 				if vm.NumSockets != nil && utils.IntValue(vm.NumSockets) > 0 {
 					overrideConfig["num_sockets"] = utils.IntValue(vm.NumSockets)
-					log.Printf("[DEBUG] 🖥️ Preserved num_sockets from API: %d", utils.IntValue(vm.NumSockets))
+					log.Printf("[DEBUG] Preserved num_sockets from API: %d", utils.IntValue(vm.NumSockets))
 				} else {
-					log.Printf("[DEBUG] ⚠️ API did not return num_sockets or returned 0, preserving user config")
+					log.Printf("[DEBUG] API did not return num_sockets or returned 0, preserving user config")
 				}
 
 				if vm.NumCoresPerSocket != nil && utils.IntValue(vm.NumCoresPerSocket) > 0 {
 					overrideConfig["num_cores_per_socket"] = utils.IntValue(vm.NumCoresPerSocket)
-					log.Printf("[DEBUG] 🖥️ Preserved num_cores_per_socket from API: %d", utils.IntValue(vm.NumCoresPerSocket))
+					log.Printf("[DEBUG] Preserved num_cores_per_socket from API: %d", utils.IntValue(vm.NumCoresPerSocket))
 				} else {
-					log.Printf("[DEBUG] ⚠️ API did not return num_cores_per_socket or returned 0, preserving user config")
+					log.Printf("[DEBUG] API did not return num_cores_per_socket or returned 0, preserving user config")
 				}
 
 				if vm.NumThreadsPerCore != nil && utils.IntValue(vm.NumThreadsPerCore) > 0 {
 					overrideConfig["num_threads_per_core"] = utils.IntValue(vm.NumThreadsPerCore)
-					log.Printf("[DEBUG] 🖥️ Preserved num_threads_per_core from API: %d", utils.IntValue(vm.NumThreadsPerCore))
+					log.Printf("[DEBUG] Preserved num_threads_per_core from API: %d", utils.IntValue(vm.NumThreadsPerCore))
 				} else {
-					log.Printf("[DEBUG] ⚠️ API did not return num_threads_per_core or returned 0, preserving user config")
+					log.Printf("[DEBUG] API did not return num_threads_per_core or returned 0, preserving user config")
 				}
 
 				if vm.MemorySizeBytes != nil && utils.Int64Value(vm.MemorySizeBytes) > 0 {
@@ -811,7 +804,7 @@ func setOvaVMConfig(d *schema.ResourceData, vm import2.Vm) diag.Diagnostics {
 				}
 				if vm.PowerState != nil {
 					overrideConfig["power_state"] = vm.PowerState.GetName()
-					log.Printf("[DEBUG] ⚡ Set power_state: %s", vm.PowerState.GetName())
+					log.Printf("[DEBUG] Set power_state: %s", vm.PowerState.GetName())
 				}
 
 				// Only update NICs to fix the trunked_vlans drift issue
@@ -857,11 +850,11 @@ func setOvaVMConfig(d *schema.ResourceData, vm import2.Vm) diag.Diagnostics {
 							// Handle trunked_vlans properly - this is the main fix for drift
 							if len(nic.NetworkInfo.TrunkedVlans) > 0 {
 								networkInfo["trunked_vlans"] = nic.NetworkInfo.TrunkedVlans
-								log.Printf("[DEBUG] 🏷️ Setting trunked_vlans: %v", nic.NetworkInfo.TrunkedVlans)
+								log.Printf("[DEBUG] Setting trunked_vlans: %v", nic.NetworkInfo.TrunkedVlans)
 							} else {
 								// Set empty array if no trunked VLANs to prevent drift
 								networkInfo["trunked_vlans"] = []int{}
-								log.Printf("[DEBUG] 🏷️ Setting empty trunked_vlans to prevent drift")
+								log.Printf("[DEBUG] Setting empty trunked_vlans to prevent drift")
 							}
 
 							if nic.NetworkInfo.ShouldAllowUnknownMacs != nil {
@@ -877,7 +870,7 @@ func setOvaVMConfig(d *schema.ResourceData, vm import2.Vm) diag.Diagnostics {
 
 					// Update only the NICs configuration, preserving everything else
 					overrideConfig["nics"] = nicsList
-					log.Printf("[DEBUG] ✅ Updated NICs configuration with %d NICs", len(nicsList))
+					log.Printf("[DEBUG] Updated NICs configuration with %d NICs", len(nicsList))
 				}
 
 				// Set the complete override_vm_config with preserved user settings
@@ -889,7 +882,7 @@ func setOvaVMConfig(d *schema.ResourceData, vm import2.Vm) diag.Diagnostics {
 		}
 	}
 
-	log.Printf("[DEBUG] ✅ OVA VM state set successfully (minimal update approach)")
+	log.Printf("[DEBUG] OVA VM state set successfully (minimal update approach)")
 	return nil
 }
 
@@ -931,7 +924,7 @@ func ResourceNutanixOvaVMDeploymentDelete(ctx context.Context, d *schema.Resourc
 // Helper function to handle power state changes
 func handlePowerStateChange(ctx context.Context, conn *conns.Client, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	targetPowerState := d.Get("power_state").(string)
-	log.Printf("[DEBUG] ⚡ Changing power state to: %s", targetPowerState)
+	log.Printf("[DEBUG] Changing power state to: %s", targetPowerState)
 
 	readResp, err := conn.VmmAPI.VMAPIInstance.GetVmById(utils.StringPtr(d.Id()))
 	if err != nil {
@@ -980,6 +973,6 @@ func handlePowerStateChange(ctx context.Context, conn *conns.Client, d *schema.R
 		}
 	}
 
-	log.Printf("[DEBUG] ✅ Power state changed successfully to: %s", targetPowerState)
+	log.Printf("[DEBUG] Power state changed successfully to: %s", targetPowerState)
 	return nil
 }
