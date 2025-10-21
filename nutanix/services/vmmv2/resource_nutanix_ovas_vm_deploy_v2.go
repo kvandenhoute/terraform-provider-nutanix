@@ -529,6 +529,20 @@ func ResourceNutanixOvaVMDeploymentCreate(ctx context.Context, d *schema.Resourc
 	d.SetId(*vmUUID)
 	log.Printf("[DEBUG] OVA VM deployment completed successfully: vm_id=%s", *vmUUID)
 
+	// Handle initial power state if specified as ON
+	if overrideVMConfig, ok := d.GetOk("override_vm_config"); ok {
+		overrideVMConfigList := overrideVMConfig.([]interface{})
+		if len(overrideVMConfigList) > 0 && overrideVMConfigList[0] != nil {
+			overrideConfig := overrideVMConfigList[0].(map[string]interface{})
+			if powerState, exists := overrideConfig["power_state"]; exists && powerState.(string) == "ON" {
+				log.Printf("[DEBUG] Powering on VM after deployment as requested in configuration")
+				if err := callForPowerOnVM(ctx, conn, d, meta); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
