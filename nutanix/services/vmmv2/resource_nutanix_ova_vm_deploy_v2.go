@@ -16,6 +16,7 @@ import (
 	import2 "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 	import1 "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/content"
 	conns "github.com/terraform-providers/terraform-provider-nutanix/nutanix"
+	"github.com/terraform-providers/terraform-provider-nutanix/nutanix/common"
 	"github.com/terraform-providers/terraform-provider-nutanix/utils"
 )
 
@@ -89,177 +90,9 @@ func ResourceNutanixOvaVMDeploymentV2() *schema.Resource {
 							ValidateFunc: validation.StringInSlice([]string{"ON", "OFF"}, false),
 						},
 						"nics": {
-							Type:        schema.TypeList,
-							Required:    true,
-							Description: "Network interface controllers (NICs) for the VM.",
-							Elem: &schema.Resource{
-								Schema: map[string]*schema.Schema{
-									"ext_id": {
-										Type:        schema.TypeString,
-										Computed:    true,
-										Description: "The globally unique identifier of the NIC.",
-									},
-									"backing_info": {
-										Type:        schema.TypeList,
-										Optional:    true,
-										MaxItems:    1,
-										Description: "Backing information for the NIC including model and MAC address.",
-										Elem: &schema.Resource{
-											Schema: map[string]*schema.Schema{
-												"model": {
-													Type:     schema.TypeString,
-													Optional: true,
-												},
-												"mac_address": {
-													Type:     schema.TypeString,
-													Optional: true,
-												},
-												"is_connected": {
-													Type:     schema.TypeBool,
-													Optional: true,
-												},
-												"num_queues": {
-													Type:     schema.TypeInt,
-													Optional: true,
-													Default:  1,
-												},
-											},
-										},
-									},
-									"network_info": {
-										Type:     schema.TypeList,
-										Optional: true,
-										Elem: &schema.Resource{
-											Schema: map[string]*schema.Schema{
-												"nic_type": {
-													Type:     schema.TypeString,
-													Optional: true,
-													ValidateFunc: validation.StringInSlice([]string{
-														"SPAN_DESTINATION_NIC",
-														"NORMAL_NIC", "DIRECT_NIC", "NETWORK_FUNCTION_NIC",
-													}, false),
-												},
-												"network_function_chain": {
-													Type:     schema.TypeList,
-													Optional: true,
-													Elem: &schema.Resource{
-														Schema: map[string]*schema.Schema{
-															"ext_id": {
-																Type:     schema.TypeString,
-																Optional: true,
-															},
-														},
-													},
-												},
-												"network_function_nic_type": {
-													Type:     schema.TypeString,
-													Optional: true,
-													ValidateFunc: validation.StringInSlice([]string{
-														"TAP", "EGRESS",
-														"INGRESS",
-													}, false),
-												},
-												"subnet": {
-													Type:     schema.TypeList,
-													Optional: true,
-													Elem: &schema.Resource{
-														Schema: map[string]*schema.Schema{
-															"ext_id": {
-																Type:     schema.TypeString,
-																Optional: true,
-															},
-														},
-													},
-												},
-												"vlan_mode": {
-													Type:         schema.TypeString,
-													Optional:     true,
-													ValidateFunc: validation.StringInSlice([]string{"TRUNK", "ACCESS"}, false),
-												},
-												"trunked_vlans": {
-													Type:     schema.TypeList,
-													Optional: true,
-													Elem: &schema.Schema{
-														Type: schema.TypeInt,
-													},
-												},
-												"should_allow_unknown_macs": {
-													Type:     schema.TypeBool,
-													Optional: true,
-												},
-												"ipv4_config": {
-													Type:     schema.TypeList,
-													Optional: true,
-													Elem: &schema.Resource{
-														Schema: map[string]*schema.Schema{
-															"should_assign_ip": {
-																Type:     schema.TypeBool,
-																Optional: true,
-															},
-															"ip_address": {
-																Type:     schema.TypeList,
-																Optional: true,
-																Elem: &schema.Resource{
-																	Schema: map[string]*schema.Schema{
-																		"value": {
-																			Type:     schema.TypeString,
-																			Optional: true,
-																		},
-																		"prefix_length": {
-																			Type:     schema.TypeInt,
-																			Optional: true,
-																		},
-																	},
-																},
-															},
-															"secondary_ip_address_list": {
-																Type:     schema.TypeList,
-																Optional: true,
-																Elem: &schema.Resource{
-																	Schema: map[string]*schema.Schema{
-																		"value": {
-																			Type:     schema.TypeString,
-																			Optional: true,
-																		},
-																		"prefix_length": {
-																			Type:     schema.TypeInt,
-																			Optional: true,
-																		},
-																	},
-																},
-															},
-														},
-													},
-												},
-												"ipv4_info": {
-													Type:     schema.TypeList,
-													Optional: true,
-													Elem: &schema.Resource{
-														Schema: map[string]*schema.Schema{
-															"learned_ip_addresses": {
-																Type:     schema.TypeList,
-																Optional: true,
-																Elem: &schema.Resource{
-																	Schema: map[string]*schema.Schema{
-																		"value": {
-																			Type:     schema.TypeString,
-																			Required: true,
-																		},
-																		"prefix_length": {
-																			Type:     schema.TypeInt,
-																			Optional: true,
-																		},
-																	},
-																},
-															},
-														},
-													},
-												},
-											},
-										},
-									},
-								},
-							},
+							Type:     schema.TypeList,
+							Required: true,
+							Elem:     nicsElemSchemaV2(),
 						},
 						"cd_roms": {
 							Type:     schema.TypeList,
@@ -674,17 +507,15 @@ func ResourceNutanixOvaVMDeploymentCreate(ctx context.Context, d *schema.Resourc
 	log.Printf("[DEBUG] OVA deployment task started with UUID: %s", utils.StringValue(taskUUID))
 
 	taskconn := meta.(*conns.Client).PrismAPI
+	// Wait for the OVA VM to be deployed
 	stateConf := &resource.StateChangeConf{
-		Pending:      []string{"QUEUED", "RUNNING", "PENDING"},
-		Target:       []string{"SUCCEEDED"},
-		Refresh:      taskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
-		Timeout:      d.Timeout(schema.TimeoutCreate),
-		Delay:        ovaVMDeployDelay,
-		PollInterval: ovaVMDeployDelay,
+		Pending: []string{"PENDING", "RUNNING", "QUEUED"},
+		Target:  []string{"SUCCEEDED"},
+		Refresh: common.TaskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
+		Timeout: d.Timeout(schema.TimeoutCreate),
 	}
 	if _, errWaitTask := stateConf.WaitForStateContext(ctx); errWaitTask != nil {
-		log.Printf("[ERROR] OVA deployment task failed with UUID %s: %v", utils.StringValue(taskUUID), errWaitTask)
-		return diag.Errorf("error in OVA deployment (%s): %s", utils.StringValue(taskUUID), errWaitTask)
+		return diag.Errorf("error waiting for OVA VM deployment (%s) to complete: %s", utils.StringValue(taskUUID), errWaitTask)
 	}
 
 	log.Printf("[DEBUG] OVA deployment task completed successfully with UUID: %s", utils.StringValue(taskUUID))
