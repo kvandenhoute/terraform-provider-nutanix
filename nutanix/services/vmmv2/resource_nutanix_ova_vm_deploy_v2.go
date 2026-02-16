@@ -893,7 +893,7 @@ func waitForTask(ctx context.Context, d *schema.ResourceData, meta interface{}, 
 		Pending: []string{"PENDING", "RUNNING", "QUEUED"},
 		Target:  []string{"SUCCEEDED"},
 		Refresh: common.TaskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
-		Timeout: d.Timeout(schema.TimeoutCreate),
+		Timeout: d.Timeout(timeoutType),
 	}
 	if _, errWaitTask := stateConf.WaitForStateContext(ctx); errWaitTask != nil {
 		return diag.Errorf("error waiting for %s (%s): %s", operation, utils.StringValue(taskUUID), errWaitTask)
