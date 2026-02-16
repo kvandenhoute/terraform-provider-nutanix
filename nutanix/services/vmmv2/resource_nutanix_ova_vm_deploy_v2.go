@@ -30,9 +30,6 @@ func ResourceNutanixOvaVMDeploymentV2() *schema.Resource {
 		ReadContext:   ResourceNutanixOvaVMDeploymentRead,
 		UpdateContext: ResourceNutanixOvaVMDeploymentUpdate,
 		DeleteContext: ResourceNutanixOvaVMDeploymentDelete,
-		// Importer: &schema.ResourceImporter{
-		// 	StateContext: schema.ImportStatePassthroughContext,
-		// },
 		Timeouts: &schema.ResourceTimeout{
 			Create: schema.DefaultTimeout(ovaVMDeployTimeout),
 			Update: schema.DefaultTimeout(ovaVMDeployTimeout),
