@@ -162,9 +162,12 @@ data "nutanix_clusters_v2" "clusters" {
 
 locals {
   cluster_ext_id = data.nutanix_clusters_v2.clusters.cluster_entities[0].ext_id
+  config = jsondecode(file("%[1]s"))
+  vmm    = local.config.vmm
 }
 
 data "nutanix_subnets_v2" "subnets" {
+  filter = "name eq '${local.vmm.subnet_name}'"
   limit = 1
 }
 
@@ -175,8 +178,8 @@ data "nutanix_storage_containers_v2" "ngt-sc" {
 
 
 resource "nutanix_virtual_machine_v2" "ova-vm" {
-  name        = "%[1]s"
-  description = "%[2]s"
+  name        = "%[2]s"
+  description = "%[3]s"
   num_sockets = 2
   num_threads_per_core = 2
   num_cores_per_socket = 4
@@ -203,7 +206,7 @@ resource "nutanix_virtual_machine_v2" "ova-vm" {
 
 
 resource "nutanix_ova_v2" "test" {
-  name = "%[3]s"
+  name = "%[4]s"
   source {
     ova_vm_source {
       vm_ext_id        = nutanix_virtual_machine_v2.ova-vm.id
@@ -241,13 +244,26 @@ data "nutanix_virtual_machines_v2" "vm-from-ova"{
   filter = "name eq '${nutanix_ova_vm_deploy_v2.test.override_vm_config.0.name}' and cluster/extId eq '${local.cluster_ext_id}' and memorySizeBytes eq ${nutanix_ova_vm_deploy_v2.test.override_vm_config.0.memory_size_bytes}"
 }
 
-`, vmName, vmDescription, ovaName)
+`, filepath, vmName, vmDescription, ovaName)
 }
 
 func testOvaVMDeployResourceConfigDeployVMFromOvaDoseNotExists(ovaName string) string {
-	return `
+	return fmt.Sprintf(`
+
+
+data "nutanix_clusters_v2" "clusters" {
+  filter = "config/clusterFunction/any(a:a eq Clustermgmt.Config.ClusterFunctionRef'AOS')"
+  limit  = 1
+}
+
+locals {
+  cluster_ext_id = data.nutanix_clusters_v2.clusters.cluster_entities[0].ext_id
+  config = jsondecode(file("%s"))
+  vmm    = local.config.vmm
+}
 
 data "nutanix_subnets_v2" "subnets" {
+  filter = "name eq '${local.vmm.subnet_name}'"
   limit = 1
 }
 
@@ -269,9 +285,9 @@ resource "nutanix_ova_vm_deploy_v2" "test" {
       }
     }
   }
-  cluster_location_ext_id = "1f8b1211-5adf-4da3-8b52-19c743b15aa1"
+  cluster_location_ext_id = local.cluster_ext_id
 }
-`
+`, filepath)
 }
 
 func testOvaVMDeployResourceConfigDeployVMFromOvaUpdated(vmName, vmDescription, ovaName string) string {
@@ -284,9 +300,12 @@ data "nutanix_clusters_v2" "clusters" {
 
 locals {
   cluster_ext_id = data.nutanix_clusters_v2.clusters.cluster_entities[0].ext_id
+  config = jsondecode(file("%[1]s"))
+  vmm    = local.config.vmm
 }
 
 data "nutanix_subnets_v2" "subnets" {
+  filter = "name eq '${local.vmm.subnet_name}'"
   limit = 1
 }
 
@@ -296,8 +315,8 @@ data "nutanix_storage_containers_v2" "ngt-sc" {
 }
 
 resource "nutanix_virtual_machine_v2" "ova-vm" {
-  name        = "%[1]s"
-  description = "%[2]s"
+  name        = "%[2]s"
+  description = "%[3]s"
   num_sockets = 2
   num_threads_per_core = 2
   num_cores_per_socket = 4
@@ -323,7 +342,7 @@ resource "nutanix_virtual_machine_v2" "ova-vm" {
 }
 
 resource "nutanix_ova_v2" "test" {
-  name = "%[3]s"
+  name = "%[4]s"
   source {
     ova_vm_source {
       vm_ext_id        = nutanix_virtual_machine_v2.ova-vm.id
@@ -357,13 +376,15 @@ resource "nutanix_ova_vm_deploy_v2" "test" {
   cluster_location_ext_id = local.cluster_ext_id
 }
 
-`, vmName, vmDescription, ovaName)
+`, filepath, vmName, vmDescription, ovaName)
 }
 
 func testOvaVMDeployResourceConfigForFullUpdate(vmName, vmDescription, ovaName, stage string) string {
 	if stage == "initial" {
 		// Initial configuration with smaller resources
 		return fmt.Sprintf(`
+
+
 
 data "nutanix_clusters_v2" "clusters" {
   filter = "config/clusterFunction/any(a:a eq Clustermgmt.Config.ClusterFunctionRef'AOS')"
@@ -372,20 +393,22 @@ data "nutanix_clusters_v2" "clusters" {
 
 locals {
   cluster_ext_id = data.nutanix_clusters_v2.clusters.cluster_entities[0].ext_id
+  config = jsondecode(file("%[1]s"))
+  vmm    = local.config.vmm
 }
 
 data "nutanix_subnets_v2" "subnets" {
+  filter = "name eq '${local.vmm.subnet_name}'"
   limit = 1
 }
-
 data "nutanix_storage_containers_v2" "ngt-sc" {
   filter = "clusterExtId eq '${local.cluster_ext_id}'"
   limit  = 1
 }
 
 resource "nutanix_virtual_machine_v2" "ova-vm" {
-  name        = "%[1]s"
-  description = "%[2]s"
+  name        = "%[2]s"
+  description = "%[3]s"
   num_sockets = 2
   num_threads_per_core = 2
   num_cores_per_socket = 4
@@ -411,7 +434,7 @@ resource "nutanix_virtual_machine_v2" "ova-vm" {
 }
 
 resource "nutanix_ova_v2" "test" {
-  name = "%[3]s"
+  name = "%[4]s"
   source {
     ova_vm_source {
       vm_ext_id        = nutanix_virtual_machine_v2.ova-vm.id
@@ -445,7 +468,7 @@ resource "nutanix_ova_vm_deploy_v2" "test" {
   cluster_location_ext_id = local.cluster_ext_id
 }
 
-`, vmName, vmDescription, ovaName)
+`, filepath, vmName, vmDescription, ovaName)
 	}
 	return fmt.Sprintf(`
 
@@ -456,20 +479,22 @@ data "nutanix_clusters_v2" "clusters" {
 
 locals {
   cluster_ext_id = data.nutanix_clusters_v2.clusters.cluster_entities[0].ext_id
+  config = jsondecode(file("%[1]s"))
+  vmm    = local.config.vmm
 }
 
 data "nutanix_subnets_v2" "subnets" {
+  filter = "name eq '${local.vmm.subnet_name}'"
   limit = 1
 }
-
 data "nutanix_storage_containers_v2" "ngt-sc" {
   filter = "clusterExtId eq '${local.cluster_ext_id}'"
   limit  = 1
 }
 
 resource "nutanix_virtual_machine_v2" "ova-vm" {
-  name        = "%[1]s"
-  description = "%[2]s"
+  name        = "%[2]s"
+  description = "%[3]s"
   num_sockets = 2
   num_threads_per_core = 2
   num_cores_per_socket = 1
@@ -495,7 +520,7 @@ resource "nutanix_virtual_machine_v2" "ova-vm" {
 }
 
 resource "nutanix_ova_v2" "test" {
-  name = "%[3]s"
+  name = "%[4]s"
   source {
     ova_vm_source {
       vm_ext_id        = nutanix_virtual_machine_v2.ova-vm.id
@@ -529,7 +554,7 @@ resource "nutanix_ova_vm_deploy_v2" "test" {
   cluster_location_ext_id = local.cluster_ext_id
 }
 
-`, vmName, vmDescription, ovaName)
+`, filepath, vmName, vmDescription, ovaName)
 }
 
 func TestAccV2NutanixOvaVmDeployResource_DiskUpdate(t *testing.T) {
@@ -578,9 +603,12 @@ data "nutanix_clusters_v2" "clusters" {
 
 locals {
   cluster_ext_id = data.nutanix_clusters_v2.clusters.cluster_entities[0].ext_id
+  config = jsondecode(file("%[1]s"))
+  vmm    = local.config.vmm
 }
 
 data "nutanix_subnets_v2" "subnets" {
+  filter = "name eq '${local.vmm.subnet_name}'"
   limit = 1
 }
 
@@ -590,8 +618,8 @@ data "nutanix_storage_containers_v2" "ngt-sc" {
 }
 
 resource "nutanix_virtual_machine_v2" "ova-vm" {
-  name        = "%[1]s"
-  description = "%[2]s"
+  name        = "%[2]s"
+  description = "%[3]s"
   num_sockets = 2
   num_threads_per_core = 2
   num_cores_per_socket = 4
@@ -617,7 +645,7 @@ resource "nutanix_virtual_machine_v2" "ova-vm" {
 }
 
 resource "nutanix_ova_v2" "test" {
-  name = "%[3]s"
+  name = "%[4]s"
   source {
     ova_vm_source {
       vm_ext_id        = nutanix_virtual_machine_v2.ova-vm.id
@@ -654,7 +682,7 @@ resource "nutanix_ova_vm_deploy_v2" "test" {
       }
       backing_info {
         vm_disk {
-          disk_size_bytes = %[4]s * 1024 * 1024 * 1024 # %[4]s GB additional disk
+          disk_size_bytes = %[5]s * 1024 * 1024 * 1024 # %[5]s GB additional disk
           storage_container {
             ext_id = data.nutanix_storage_containers_v2.ngt-sc.storage_containers[0].ext_id
           }
@@ -665,5 +693,5 @@ resource "nutanix_ova_vm_deploy_v2" "test" {
   cluster_location_ext_id = local.cluster_ext_id
 }
 
-`, vmName, vmDescription, ovaName, diskSizeGB)
+`, filepath, vmName, vmDescription, ovaName, diskSizeGB)
 }

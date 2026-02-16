@@ -22,7 +22,6 @@ import (
 
 const (
 	ovaVMDeployTimeout = 30 * time.Minute
-	ovaVMDeployDelay   = 10 * time.Second
 )
 
 func ResourceNutanixOvaVMDeploymentV2() *schema.Resource {
@@ -31,9 +30,9 @@ func ResourceNutanixOvaVMDeploymentV2() *schema.Resource {
 		ReadContext:   ResourceNutanixOvaVMDeploymentRead,
 		UpdateContext: ResourceNutanixOvaVMDeploymentUpdate,
 		DeleteContext: ResourceNutanixOvaVMDeploymentDelete,
-		Importer: &schema.ResourceImporter{
-			StateContext: schema.ImportStatePassthroughContext,
-		},
+		// Importer: &schema.ResourceImporter{
+		// 	StateContext: schema.ImportStatePassthroughContext,
+		// },
 		Timeouts: &schema.ResourceTimeout{
 			Create: schema.DefaultTimeout(ovaVMDeployTimeout),
 			Update: schema.DefaultTimeout(ovaVMDeployTimeout),
@@ -534,20 +533,10 @@ func ResourceNutanixOvaVMDeploymentCreate(ctx context.Context, d *schema.Resourc
 	if len(taskResult.EntitiesAffected) == 0 {
 		return diag.Errorf("no entities affected in OVA deployment task")
 	}
-
-	var vmUUID *string
-	for _, entity := range taskResult.EntitiesAffected {
-		if entity.Rel != nil && *entity.Rel == "vmm:ahv:config:vm" {
-			vmUUID = entity.ExtId
-			log.Printf("[DEBUG] Found VM entity in task result: %s", *vmUUID)
-			break
-		}
+	vmUUID, err := common.ExtractEntityUUIDFromTask(taskResult, utils.RelEntityTypeVM, "Virtual Machine")
+	if err != nil {
+		return diag.FromErr(err)
 	}
-
-	if vmUUID == nil {
-		return diag.Errorf("VM entity (vmm:ahv:vm) not found in task result")
-	}
-
 	d.SetId(*vmUUID)
 	log.Printf("[DEBUG] OVA VM deployment completed successfully: vm_id=%s", *vmUUID)
 
@@ -902,15 +891,13 @@ func setOvaVMConfig(d *schema.ResourceData, vm import2.Vm) diag.Diagnostics {
 // waitForTask waits for a Nutanix task to complete
 func waitForTask(ctx context.Context, d *schema.ResourceData, meta interface{}, taskUUID *string, timeoutType string, operation string) diag.Diagnostics {
 	taskconn := meta.(*conns.Client).PrismAPI
-	stateConf := &resource.StateChangeConf{
-		Pending:      []string{"QUEUED", "RUNNING"},
-		Target:       []string{"SUCCEEDED"},
-		Refresh:      taskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
-		Timeout:      d.Timeout(timeoutType),
-		Delay:        ovaVMDeployDelay,
-		PollInterval: ovaVMDeployDelay,
-	}
 
+	stateConf := &resource.StateChangeConf{
+		Pending: []string{"PENDING", "RUNNING", "QUEUED"},
+		Target:  []string{"SUCCEEDED"},
+		Refresh: common.TaskStateRefreshPrismTaskGroupFunc(ctx, taskconn, utils.StringValue(taskUUID)),
+		Timeout: d.Timeout(schema.TimeoutCreate),
+	}
 	if _, errWaitTask := stateConf.WaitForStateContext(ctx); errWaitTask != nil {
 		return diag.Errorf("error waiting for %s (%s): %s", operation, utils.StringValue(taskUUID), errWaitTask)
 	}
