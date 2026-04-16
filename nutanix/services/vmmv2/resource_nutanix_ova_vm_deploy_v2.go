@@ -786,12 +786,13 @@ func setOvaVMConfig(d *schema.ResourceData, vm import2.Vm) diag.Diagnostics {
 					log.Printf("[DEBUG] Set power_state: %s", vm.PowerState.GetName())
 				}
 				if common.IsRawConfigAvailable(d) {
+					managedDisks := flattenManagedOverrideDisks(existingConfig["disks"], vm.Disks)
+					overrideConfig["disks"] = managedDisks
+
 					if !common.IsConfigListEmptyOrMissing(d, "override_vm_config.0.disks") && vm.Disks != nil {
-						overrideConfig["disks"] = flattenDisk(vm.Disks)
-						log.Printf("[DEBUG] Updated disks configuration with %d disks from API", len(vm.Disks))
+						log.Printf("[DEBUG] Updated managed disks configuration with %d disks from API", len(managedDisks))
 					} else {
-						overrideConfig["disks"] = []interface{}{}
-						log.Printf("[DEBUG] User config has no disks block; not storing API disks in state")
+						log.Printf("[DEBUG] User config has no disks block; preserving %d managed disks in state until update/delete is applied", len(managedDisks))
 					}
 				} else {
 					log.Printf("[DEBUG] Raw config unavailable (refresh); preserving existing disk state")
@@ -818,6 +819,160 @@ func setOvaVMConfig(d *schema.ResourceData, vm import2.Vm) diag.Diagnostics {
 	log.Printf("[DEBUG] OVA VM state set successfully")
 	return nil
 }
+
+func flattenManagedOverrideDisks(existingDisks interface{}, vmDisks []import2.Disk) []interface{} {
+	flatVMDisks := flattenDisk(vmDisks)
+	if len(flatVMDisks) == 0 {
+		return []interface{}{}
+	}
+
+	requestedDisks, ok := existingDisks.([]interface{})
+	if !ok || len(requestedDisks) == 0 {
+		return []interface{}{}
+	}
+
+	findByExtID := func(extID string) interface{} {
+		for _, vmDisk := range flatVMDisks {
+			vmMap, ok := vmDisk.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if vmExtID, ok := vmMap["ext_id"].(*string); ok && vmExtID != nil && *vmExtID == extID {
+				return vmDisk
+			}
+		}
+		return nil
+	}
+
+	findByAddress := func(diskAddress interface{}) interface{} {
+		reqBusType, reqIndex, ok := extractDiskAddressIdentity(diskAddress)
+		if !ok {
+			return nil
+		}
+		for _, vmDisk := range flatVMDisks {
+			vmMap, ok := vmDisk.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			vmBusType, vmIndex, vmHasAddress := extractDiskAddressIdentity(vmMap["disk_address"])
+			if vmHasAddress && reqBusType == vmBusType && reqIndex == vmIndex {
+				return vmDisk
+			}
+		}
+		return nil
+	}
+
+	managed := make([]interface{}, 0, len(requestedDisks))
+	for _, req := range requestedDisks {
+		reqMap, ok := req.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		if extID, _ := reqMap["ext_id"].(string); extID != "" {
+			if match := findByExtID(extID); match != nil {
+				managed = append(managed, match)
+				continue
+			}
+		}
+
+		if match := findByAddress(reqMap["disk_address"]); match != nil {
+			managed = append(managed, match)
+		}
+	}
+
+	return managed
+}
+
+func extractDiskAddressIdentity(diskAddress interface{}) (string, int, bool) {
+
+    var addrMap map[string]interface{}
+
+
+
+    switch v := diskAddress.(type) {
+
+    case []interface{}:
+
+        if len(v) == 0 {
+
+            return "", 0, false
+
+        }
+
+        m, ok := v[0].(map[string]interface{})
+
+        if !ok {
+
+            return "", 0, false
+
+        }
+
+        addrMap = m
+
+    case []map[string]interface{}:
+
+        if len(v) == 0 {
+
+            return "", 0, false
+
+        }
+
+        addrMap = v[0]
+
+    default:
+
+        return "", 0, false
+
+    }
+
+
+
+    busType, ok := addrMap["bus_type"].(string)
+
+    if !ok || busType == "" {
+
+        return "", 0, false
+
+    }
+
+
+
+    indexRaw, ok := addrMap["index"]
+
+    if !ok || indexRaw == nil {
+
+        return "", 0, false
+
+    }
+
+
+
+    switch v := indexRaw.(type) {
+
+    case int:
+
+        return busType, v, true
+
+    case *int:
+
+        if v == nil {
+
+            return "", 0, false
+
+        }
+
+        return busType, *v, true
+
+    default:
+
+        return "", 0, false
+
+    }
+
+}
+
+
 
 // waitForTask waits for a Nutanix task to complete
 func waitForTask(ctx context.Context, d *schema.ResourceData, meta interface{}, taskUUID *string, timeoutType string, operation string) diag.Diagnostics {

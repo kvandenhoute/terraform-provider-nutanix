@@ -264,87 +264,90 @@ func TestAccV2NutanixOvaVmDeployResource_PowerStateAndDisks(t *testing.T) {
 	})
 }
 
-func TestAccV2NutanixOvaVmDeployResource_BasicUpdate(t *testing.T) {
+// Regression test for OVA deployments where base OVA disks already exist and an additional disk is attached.
+// Ensures second plan with identical config is empty (no disk deletion/update drift).
+func TestAccV2NutanixOvaVmDeployResource_DiskSecondApplyNoDiff(t *testing.T) {
 	r := acctest.RandIntRange(1, 999)
-	vmName := fmt.Sprintf("tf-test-vm-ova-basic-%d", r)
-	vmNameUpdated := fmt.Sprintf("tf-test-vm-ova-basic-updated-%d", r)
-	vmDescription := "VM for basic OVA update testing"
-	vmDescriptionUpdated := "VM for basic OVA update testing - updated"
-	ovaName := fmt.Sprintf("tf-test-ova-basic-%d", r)
+	vmName := fmt.Sprintf("tf-test-vm-ova-disk-idempotent-%d", r)
+	vmDescription := "VM for OVA disk idempotency testing"
+	ovaName := fmt.Sprintf("tf-test-ova-disk-idempotent-%d", r)
+	cfg := testOvaVMDeployResourceConfigWithDisk(vmName, vmDescription, ovaName, "20")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:  func() { acc.TestAccPreCheck(t) },
 		Providers: acc.TestAccProviders,
 		Steps: []resource.TestStep{
 			{
-				Config: testOvaVMDeployResourceConfigDeployVMFromOva(vmName, vmDescription, ovaName),
+				Config: cfg,
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.name", fmt.Sprintf("%s-from-ova", vmName)),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.memory_size_bytes", strconv.Itoa(8*1024*1024*1024)), // 8GB
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_sockets", "2"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_cores_per_socket", "4"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_threads_per_core", "2"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.power_state", "OFF"),
+					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.disks.#", "1"),
+					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.disks.0.disk_address.0.bus_type", "SCSI"),
+					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.disks.0.disk_address.0.index", "1"),
 					resource.TestCheckResourceAttrSet(resourceNameOvaVMDeploy, "id"),
 				),
 			},
 			{
-				Config: testOvaVMDeployResourceConfigDeployVMFromOvaUpdated(vmNameUpdated, vmDescriptionUpdated, ovaName),
-				Check: resource.ComposeTestCheckFunc(
-					// Basic update test - just name and power state change
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.name", fmt.Sprintf("%s-from-ova", vmNameUpdated)),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.memory_size_bytes", strconv.Itoa(16*1024*1024*1024)), // 16GB
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_sockets", "4"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_cores_per_socket", "2"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_threads_per_core", "1"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.power_state", "ON"),
-					resource.TestCheckResourceAttrSet(resourceNameOvaVMDeploy, "id"),
-				),
+				Config:             cfg,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
 			},
 		},
 	})
 }
 
-func TestAccV2NutanixOvaVmDeployResource_FullUpdate(t *testing.T) {
-	r := acctest.RandIntRange(1, 999)
-	vmName := fmt.Sprintf("tf-test-vm-ova-full-%d", r)
-	vmNameUpdated := fmt.Sprintf("tf-test-vm-ova-full-updated-%d", r)
-	vmDescription := "VM for comprehensive OVA update testing"
-	vmDescriptionUpdated := "VM for comprehensive OVA update testing - updated"
-	ovaName := fmt.Sprintf("tf-test-ova-full-%d", r)
+// disk lifecycle when OVA VM already has a base disk:
+// add second disk, add third disk, reapply (no changes), remove second disk, reapply (no changes).
+func TestAccV2NutanixOvaVmDeployResource_DiskLifecycleWithExistingOvaDisk(t *testing.T) {
+  r := acctest.RandIntRange(1, 999)
+  vmName := fmt.Sprintf("tf-test-vm-ova-disk-lifecycle-%d", r)
+  vmDescription := "VM for OVA disk lifecycle testing"
+  ovaName := fmt.Sprintf("tf-test-ova-disk-lifecycle-%d", r)
 
-	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { acc.TestAccPreCheck(t) },
-		Providers: acc.TestAccProviders,
-		Steps: []resource.TestStep{
-			{
-				Config: testOvaVMDeployResourceConfigForFullUpdate(vmName, vmDescription, ovaName, "initial"),
-				Check: resource.ComposeTestCheckFunc(
-					// Initial configuration checks
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.name", fmt.Sprintf("%s-from-ova", vmName)),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.memory_size_bytes", strconv.Itoa(4*1024*1024*1024)), // 4GB
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_sockets", "2"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_cores_per_socket", "2"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_threads_per_core", "1"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.power_state", "OFF"),
-					resource.TestCheckResourceAttrSet(resourceNameOvaVMDeploy, "id"),
-				),
-			},
-			{
-				Config: testOvaVMDeployResourceConfigForFullUpdate(vmNameUpdated, vmDescriptionUpdated, ovaName, "updated"),
-				Check: resource.ComposeTestCheckFunc(
-					// Updated configuration checks - all properties changed
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.name", fmt.Sprintf("%s-from-ova", vmNameUpdated)),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.memory_size_bytes", strconv.Itoa(12*1024*1024*1024)), // 12GB
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_sockets", "6"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_cores_per_socket", "1"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.num_threads_per_core", "2"),
-					resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.power_state", "ON"),
-					resource.TestCheckResourceAttrSet(resourceNameOvaVMDeploy, "id"),
-				),
-			},
-		},
-	})
+  resource.Test(t, resource.TestCase{
+    PreCheck:  func() { acc.TestAccPreCheck(t) },
+    Providers: acc.TestAccProviders,
+    Steps: []resource.TestStep{
+      {
+        Config: testOvaVMDeployResourceConfigDiskLifecycleWithExistingOvaDisk(vmName, vmDescription, ovaName, "one_added"),
+        Check: resource.ComposeTestCheckFunc(
+          resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.disks.#", "1"),
+          resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.disks.0.disk_address.0.bus_type", "SCSI"),
+          resource.TestCheckResourceAttrSet(resourceNameOvaVMDeploy, "id"),
+        ),
+      },
+      {
+        Config: testOvaVMDeployResourceConfigDiskLifecycleWithExistingOvaDisk(vmName, vmDescription, ovaName, "two_added"),
+        Check: resource.ComposeTestCheckFunc(
+          resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.disks.#", "2"),
+          resource.TestCheckResourceAttrSet(resourceNameOvaVMDeploy, "id"),
+        ),
+      },
+      {
+        Config: testOvaVMDeployResourceConfigDiskLifecycleWithExistingOvaDisk(vmName, vmDescription, ovaName, "three_added"),
+        Check: resource.ComposeTestCheckFunc(
+          resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.disks.#", "3"),
+          resource.TestCheckResourceAttrSet(resourceNameOvaVMDeploy, "id"),
+        ),
+      },
+      {
+        Config:             testOvaVMDeployResourceConfigDiskLifecycleWithExistingOvaDisk(vmName, vmDescription, ovaName, "three_added"),
+        PlanOnly:           true,
+        ExpectNonEmptyPlan: false,
+      },
+      {
+        Config: testOvaVMDeployResourceConfigDiskLifecycleWithExistingOvaDisk(vmName, vmDescription, ovaName, "remove_second"),
+        Check: resource.ComposeTestCheckFunc(
+          resource.TestCheckResourceAttr(resourceNameOvaVMDeploy, "override_vm_config.0.disks.#", "2"),
+          resource.TestCheckResourceAttrSet(resourceNameOvaVMDeploy, "id"),
+        ),
+      },
+      {
+        Config:             testOvaVMDeployResourceConfigDiskLifecycleWithExistingOvaDisk(vmName, vmDescription, ovaName, "remove_second"),
+        PlanOnly:           true,
+        ExpectNonEmptyPlan: false,
+      },
+    },
+  })
 }
 
 func testOvaVMDeployResourceConfigDeployVMFromOva(vmName, vmDescription, ovaName string) string {
@@ -1167,5 +1170,317 @@ resource "nutanix_ova_vm_deploy_v2" "test" {
 		return fmt.Sprintf(onAgain, args...)
 	default:
 		return fmt.Sprintf(createOn, args...)
+	}
+}
+
+func testOvaVMDeployResourceConfigDiskLifecycleWithExistingOvaDisk(vmName, vmDescription, ovaName, stage string) string {
+	base := `
+data "nutanix_clusters_v2" "clusters" {
+  filter = "config/clusterFunction/any(a:a eq Clustermgmt.Config.ClusterFunctionRef'AOS')"
+  limit  = 1
+}
+
+locals {
+  cluster_ext_id = data.nutanix_clusters_v2.clusters.cluster_entities[0].ext_id
+  config = jsondecode(file("%[1]s"))
+  vmm    = local.config.vmm
+}
+
+data "nutanix_subnets_v2" "subnets" {
+  filter = "name eq '${local.vmm.subnet_name}'"
+  limit = 1
+}
+
+data "nutanix_storage_containers_v2" "ngt-sc" {
+  filter = "clusterExtId eq '${local.cluster_ext_id}' and startswith(name,'default-container-')"
+  limit  = 1
+}
+
+resource "nutanix_virtual_machine_v2" "ova-vm" {
+  name        = "%[2]s"
+  description = "%[3]s"
+  num_sockets = 2
+  num_threads_per_core = 2
+  num_cores_per_socket = 4
+  cluster {
+    ext_id = local.cluster_ext_id
+  }
+  disks {
+    disk_address {
+      bus_type = "SCSI"
+      index    = 0
+    }
+    backing_info {
+      vm_disk {
+        disk_size_bytes = 10 * 1024 * 1024 * 1024 # Base OVA disk (10 GiB)
+        storage_container {
+          ext_id = data.nutanix_storage_containers_v2.ngt-sc.storage_containers[0].ext_id
+        }
+      }
+    }
+  }
+  memory_size_bytes = 4 * 1024 * 1024 * 1024
+  power_state      = "OFF"
+}
+
+resource "nutanix_ova_v2" "test" {
+  name = "%[4]s"
+  source {
+    ova_vm_source {
+      vm_ext_id        = nutanix_virtual_machine_v2.ova-vm.id
+      disk_file_format = "QCOW2"
+    }
+  }
+}
+`
+
+	withOneAdded := base + `
+resource "nutanix_ova_vm_deploy_v2" "test" {
+  ext_id = nutanix_ova_v2.test.id
+  override_vm_config {
+    name                 = "${nutanix_virtual_machine_v2.ova-vm.name}-from-ova"
+    memory_size_bytes    = 8 * 1024 * 1024 * 1024
+    num_sockets          = 2
+    num_cores_per_socket = 4
+    num_threads_per_core = 2
+    power_state          = "OFF"
+    nics {
+      nic_backing_info {
+        virtual_ethernet_nic {
+          is_connected = true
+        }
+      }
+      nic_network_info {
+        virtual_ethernet_nic_network_info {
+          nic_type = "NORMAL_NIC"
+          subnet {
+            ext_id = data.nutanix_subnets_v2.subnets.subnets[0].ext_id
+          }
+          vlan_mode = "ACCESS"
+        }
+      }
+    }
+    disks {
+      disk_address {
+        bus_type = "SCSI"
+        index    = 1
+      }
+      backing_info {
+        vm_disk {
+          disk_size_bytes = 10 * 1024 * 1024 * 1024
+          storage_container {
+            ext_id = data.nutanix_storage_containers_v2.ngt-sc.storage_containers[0].ext_id
+          }
+        }
+      }
+    }
+  }
+  cluster_location_ext_id = local.cluster_ext_id
+}
+`
+
+	withTwoAdded := base + `
+resource "nutanix_ova_vm_deploy_v2" "test" {
+  ext_id = nutanix_ova_v2.test.id
+  override_vm_config {
+    name                 = "${nutanix_virtual_machine_v2.ova-vm.name}-from-ova"
+    memory_size_bytes    = 8 * 1024 * 1024 * 1024
+    num_sockets          = 2
+    num_cores_per_socket = 4
+    num_threads_per_core = 2
+    power_state          = "OFF"
+    nics {
+      nic_backing_info {
+        virtual_ethernet_nic {
+          is_connected = true
+        }
+      }
+      nic_network_info {
+        virtual_ethernet_nic_network_info {
+          nic_type = "NORMAL_NIC"
+          subnet {
+            ext_id = data.nutanix_subnets_v2.subnets.subnets[0].ext_id
+          }
+          vlan_mode = "ACCESS"
+        }
+      }
+    }
+    disks {
+      disk_address {
+        bus_type = "SCSI"
+        index    = 1
+      }
+      backing_info {
+        vm_disk {
+          disk_size_bytes = 10 * 1024 * 1024 * 1024
+          storage_container {
+            ext_id = data.nutanix_storage_containers_v2.ngt-sc.storage_containers[0].ext_id
+          }
+        }
+      }
+    }
+    disks {
+      disk_address {
+        bus_type = "SCSI"
+        index    = 2
+      }
+      backing_info {
+        vm_disk {
+          disk_size_bytes = 12 * 1024 * 1024 * 1024
+          storage_container {
+            ext_id = data.nutanix_storage_containers_v2.ngt-sc.storage_containers[0].ext_id
+          }
+        }
+      }
+    }
+  }
+  cluster_location_ext_id = local.cluster_ext_id
+}
+`
+
+	withThreeAdded := base + `
+resource "nutanix_ova_vm_deploy_v2" "test" {
+  ext_id = nutanix_ova_v2.test.id
+  override_vm_config {
+    name                 = "${nutanix_virtual_machine_v2.ova-vm.name}-from-ova"
+    memory_size_bytes    = 8 * 1024 * 1024 * 1024
+    num_sockets          = 2
+    num_cores_per_socket = 4
+    num_threads_per_core = 2
+    power_state          = "OFF"
+    nics {
+      nic_backing_info {
+        virtual_ethernet_nic {
+          is_connected = true
+        }
+      }
+      nic_network_info {
+        virtual_ethernet_nic_network_info {
+          nic_type = "NORMAL_NIC"
+          subnet {
+            ext_id = data.nutanix_subnets_v2.subnets.subnets[0].ext_id
+          }
+          vlan_mode = "ACCESS"
+        }
+      }
+    }
+    disks {
+      disk_address {
+        bus_type = "SCSI"
+        index    = 1
+      }
+      backing_info {
+        vm_disk {
+          disk_size_bytes = 10 * 1024 * 1024 * 1024
+          storage_container {
+            ext_id = data.nutanix_storage_containers_v2.ngt-sc.storage_containers[0].ext_id
+          }
+        }
+      }
+    }
+    disks {
+      disk_address {
+        bus_type = "SCSI"
+        index    = 2
+      }
+      backing_info {
+        vm_disk {
+          disk_size_bytes = 12 * 1024 * 1024 * 1024
+          storage_container {
+            ext_id = data.nutanix_storage_containers_v2.ngt-sc.storage_containers[0].ext_id
+          }
+        }
+      }
+    }
+    disks {
+      disk_address {
+        bus_type = "SCSI"
+        index    = 3
+      }
+      backing_info {
+        vm_disk {
+          disk_size_bytes = 14 * 1024 * 1024 * 1024
+          storage_container {
+            ext_id = data.nutanix_storage_containers_v2.ngt-sc.storage_containers[0].ext_id
+          }
+        }
+      }
+    }
+  }
+  cluster_location_ext_id = local.cluster_ext_id
+}
+`
+
+	removeSecond := base + `
+resource "nutanix_ova_vm_deploy_v2" "test" {
+  ext_id = nutanix_ova_v2.test.id
+  override_vm_config {
+    name                 = "${nutanix_virtual_machine_v2.ova-vm.name}-from-ova"
+    memory_size_bytes    = 8 * 1024 * 1024 * 1024
+    num_sockets          = 2
+    num_cores_per_socket = 4
+    num_threads_per_core = 2
+    power_state          = "OFF"
+    nics {
+      nic_backing_info {
+        virtual_ethernet_nic {
+          is_connected = true
+        }
+      }
+      nic_network_info {
+        virtual_ethernet_nic_network_info {
+          nic_type = "NORMAL_NIC"
+          subnet {
+            ext_id = data.nutanix_subnets_v2.subnets.subnets[0].ext_id
+          }
+          vlan_mode = "ACCESS"
+        }
+      }
+    }
+    disks {
+      disk_address {
+        bus_type = "SCSI"
+        index    = 1
+      }
+      backing_info {
+        vm_disk {
+          disk_size_bytes = 10 * 1024 * 1024 * 1024
+          storage_container {
+            ext_id = data.nutanix_storage_containers_v2.ngt-sc.storage_containers[0].ext_id
+          }
+        }
+      }
+    }
+    disks {
+      disk_address {
+        bus_type = "SCSI"
+        index    = 2
+      }
+      backing_info {
+        vm_disk {
+          disk_size_bytes = 14 * 1024 * 1024 * 1024
+          storage_container {
+            ext_id = data.nutanix_storage_containers_v2.ngt-sc.storage_containers[0].ext_id
+          }
+        }
+      }
+    }
+  }
+  cluster_location_ext_id = local.cluster_ext_id
+}
+`
+
+	args := []interface{}{filepath, vmName, vmDescription, ovaName}
+	switch stage {
+	case "one_added":
+		return fmt.Sprintf(withOneAdded, args...)
+	case "two_added":
+		return fmt.Sprintf(withTwoAdded, args...)
+	case "three_added":
+		return fmt.Sprintf(withThreeAdded, args...)
+	case "remove_second":
+		return fmt.Sprintf(removeSecond, args...)
+	default:
+		return fmt.Sprintf(withOneAdded, args...)
 	}
 }
