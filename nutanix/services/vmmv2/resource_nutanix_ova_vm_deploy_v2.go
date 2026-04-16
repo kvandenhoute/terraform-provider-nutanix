@@ -885,94 +885,49 @@ func flattenManagedOverrideDisks(existingDisks interface{}, vmDisks []import2.Di
 }
 
 func extractDiskAddressIdentity(diskAddress interface{}) (string, int, bool) {
+	var addrMap map[string]interface{}
 
-    var addrMap map[string]interface{}
+	switch v := diskAddress.(type) {
+	case []interface{}:
+		if len(v) == 0 {
+			return "", 0, false
+		}
+		m, ok := v[0].(map[string]interface{})
+		if !ok {
+			return "", 0, false
+		}
+		addrMap = m
+	case []map[string]interface{}:
+		if len(v) == 0 {
+			return "", 0, false
+		}
+		addrMap = v[0]
+	default:
+		return "", 0, false
+	}
+	
+	busType, ok := addrMap["bus_type"].(string)
+	if !ok || busType == "" {
+		return "", 0, false
+	}
+	
+	indexRaw, ok := addrMap["index"]
+	if !ok || indexRaw == nil {
+		return "", 0, false
+	}
 
-
-
-    switch v := diskAddress.(type) {
-
-    case []interface{}:
-
-        if len(v) == 0 {
-
-            return "", 0, false
-
-        }
-
-        m, ok := v[0].(map[string]interface{})
-
-        if !ok {
-
-            return "", 0, false
-
-        }
-
-        addrMap = m
-
-    case []map[string]interface{}:
-
-        if len(v) == 0 {
-
-            return "", 0, false
-
-        }
-
-        addrMap = v[0]
-
-    default:
-
-        return "", 0, false
-
-    }
-
-
-
-    busType, ok := addrMap["bus_type"].(string)
-
-    if !ok || busType == "" {
-
-        return "", 0, false
-
-    }
-
-
-
-    indexRaw, ok := addrMap["index"]
-
-    if !ok || indexRaw == nil {
-
-        return "", 0, false
-
-    }
-
-
-
-    switch v := indexRaw.(type) {
-
-    case int:
-
-        return busType, v, true
-
-    case *int:
-
-        if v == nil {
-
-            return "", 0, false
-
-        }
-
-        return busType, *v, true
-
-    default:
-
-        return "", 0, false
-
-    }
-
+	switch v := indexRaw.(type) {
+	case int:
+		return busType, v, true
+	case *int:
+		if v == nil {
+			return "", 0, false
+		}
+		return busType, *v, true
+	default:
+		return "", 0, false
+	}
 }
-
-
 
 // waitForTask waits for a Nutanix task to complete
 func waitForTask(ctx context.Context, d *schema.ResourceData, meta interface{}, taskUUID *string, timeoutType string, operation string) diag.Diagnostics {
