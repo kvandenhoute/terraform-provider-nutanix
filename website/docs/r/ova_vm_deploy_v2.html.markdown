@@ -23,16 +23,31 @@ resource "nutanix_ova_vm_deploy_v2" "test" {
     name              = "vm-from-ova"
     memory_size_bytes = 8 * 1024 * 1024 * 1024 # 8 GiB
     nics {
-      backing_info {
-        is_connected = true
-      }
-      network_info {
-        nic_type = "NORMAL_NIC"
-        subnet {
-          ext_id = "9bd6cbc2-a592-4728-ab89-473612f46b99"
+      nic_backing_info {
+        virtual_ethernet_nic {
+          is_connected = true
         }
-        vlan_mode     = "TRUNK"
-        trunked_vlans = ["1"]
+      }
+      nic_network_info {
+        virtual_ethernet_nic_network_info {
+          nic_type = "NORMAL_NIC"
+          subnet {
+            ext_id = "9bd6cbc2-a592-4728-ab89-473612f46b99"
+          }
+          vlan_mode     = "TRUNK"
+          trunked_vlans = ["1"]
+        }
+      }
+    }
+    disks {
+      disk_address {
+        bus_type = "SCSI"
+        index    = 0
+      }
+      backing_info {
+        vm_disk {
+          disk_size_bytes = 10 * 1024 * 1024 * 1024 # 10 GiB
+        }
       }
     }
     disks {
@@ -140,4 +155,4 @@ The `categories` attribute supports the following:
 * `ext_id`: A globally unique identifier of a VM category of type UUID.
 
 
-See detailed information in [Nutanix Deploy VMs from an OVA V4](https://developers.nutanix.com/api-reference?namespace=vmm&version=v4.1#tag/Ovas/operation/deployOva).
+See detailed information in [Nutanix Deploy VMs from an OVA V4](https://developers.nutanix.com/api-reference?namespace=vmm&version=v4.2#tag/Ovas/operation/deployOva).
